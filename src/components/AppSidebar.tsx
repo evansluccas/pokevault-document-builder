@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderOpen,
@@ -10,6 +10,8 @@ import {
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -23,24 +25,30 @@ const mobileNavItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: FolderOpen, label: "Collections", path: "/collections" },
   { icon: PlusCircle, label: "Add", path: "/items/new" },
-  { icon: Search, label: "Search", path: "/search" },
+  { icon: Search, label: "Search", path: "/dashboard" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 
 export function AppSidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out successfully");
+    navigate("/");
+  };
 
   return (
     <aside className="hidden md:flex flex-col w-64 bg-sidebar border-r border-sidebar-border h-screen sticky top-0">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-sidebar-border">
+      <Link to="/dashboard" className="flex items-center gap-3 px-6 py-5 border-b border-sidebar-border">
         <div className="w-8 h-8 rounded-lg gradient-accent flex items-center justify-center">
           <span className="text-accent-foreground font-bold text-sm">PV</span>
         </div>
         <span className="text-lg font-bold text-sidebar-accent-foreground">PokéVault</span>
-      </div>
+      </Link>
 
-      {/* Nav Links */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
@@ -49,9 +57,7 @@ export function AppSidebar() {
               <Button
                 variant="nav"
                 className={`w-full gap-3 px-3 h-10 ${
-                  isActive
-                    ? "bg-sidebar-accent text-sidebar-primary font-semibold"
-                    : ""
+                  isActive ? "bg-sidebar-accent text-sidebar-primary font-semibold" : ""
                 }`}
               >
                 <item.icon className="w-5 h-5" />
@@ -62,7 +68,6 @@ export function AppSidebar() {
         })}
       </nav>
 
-      {/* Add Item CTA */}
       <div className="px-3 pb-3">
         <Link to="/items/new">
           <Button variant="hero" className="w-full gap-2">
@@ -72,9 +77,8 @@ export function AppSidebar() {
         </Link>
       </div>
 
-      {/* Footer */}
       <div className="px-3 py-4 border-t border-sidebar-border">
-        <Button variant="nav" className="w-full gap-3 px-3 h-10 text-muted-foreground">
+        <Button variant="nav" className="w-full gap-3 px-3 h-10 text-muted-foreground" onClick={handleSignOut}>
           <LogOut className="w-5 h-5" />
           Sign Out
         </Button>
@@ -94,7 +98,7 @@ export function MobileBottomNav() {
           const isCenter = item.label === "Add";
           return (
             <Link
-              key={item.path}
+              key={item.path + item.label}
               to={item.path}
               className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
                 isCenter
