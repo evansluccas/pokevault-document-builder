@@ -14,7 +14,166 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      collections: {
+        Row: {
+          cover_image_url: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          is_public: boolean | null
+          name: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          cover_image_url?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_public?: boolean | null
+          name: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          cover_image_url?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_public?: boolean | null
+          name?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ebay_prices: {
+        Row: {
+          average_price: number | null
+          fetched_at: string | null
+          highest_price: number | null
+          id: string
+          item_id: string
+          lowest_price: number | null
+          sold_prices: Json | null
+        }
+        Insert: {
+          average_price?: number | null
+          fetched_at?: string | null
+          highest_price?: number | null
+          id?: string
+          item_id: string
+          lowest_price?: number | null
+          sold_prices?: Json | null
+        }
+        Update: {
+          average_price?: number | null
+          fetched_at?: string | null
+          highest_price?: number | null
+          id?: string
+          item_id?: string
+          lowest_price?: number | null
+          sold_prices?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ebay_prices_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      items: {
+        Row: {
+          card_number: string | null
+          collection_id: string | null
+          condition: string | null
+          created_at: string | null
+          currency: string | null
+          era_name: string | null
+          id: string
+          image_url: string | null
+          name: string
+          notes: string | null
+          purchase_price: number | null
+          set_name: string | null
+          type: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          card_number?: string | null
+          collection_id?: string | null
+          condition?: string | null
+          created_at?: string | null
+          currency?: string | null
+          era_name?: string | null
+          id?: string
+          image_url?: string | null
+          name: string
+          notes?: string | null
+          purchase_price?: number | null
+          set_name?: string | null
+          type?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          card_number?: string | null
+          collection_id?: string | null
+          condition?: string | null
+          created_at?: string | null
+          currency?: string | null
+          era_name?: string | null
+          id?: string
+          image_url?: string | null
+          name?: string
+          notes?: string | null
+          purchase_price?: number | null
+          set_name?: string | null
+          type?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "items_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          display_name: string | null
+          id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
