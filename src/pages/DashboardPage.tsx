@@ -79,7 +79,8 @@ export default function DashboardPage() {
           ) : recentItems && recentItems.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {recentItems.slice(0, 8).map((item) => (
-                <Card key={item.id} className="glass-elevated hover:shadow-lg transition-shadow cursor-pointer">
+                <Link key={item.id} to={`/items/${item.id}`}>
+                <Card className="glass-elevated hover:shadow-lg transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="w-full h-24 rounded-lg bg-muted flex items-center justify-center mb-3">
                       {item.image_url ? (
@@ -95,6 +96,7 @@ export default function DashboardPage() {
                     )}
                   </CardContent>
                 </Card>
+                </Link>
               ))}
             </div>
           ) : (
