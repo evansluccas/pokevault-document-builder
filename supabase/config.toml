@@ -1,1 +1,7 @@
 project_id = "iayqftsyffrmrvbtknpu"
+
+[functions.scan-card]
+verify_jwt = false
+
+[functions.ebay-prices]
+verify_jwt = false

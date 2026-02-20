@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,10 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Upload, ScanLine, Save } from "lucide-react";
 import { toast } from "sonner";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useCreateItem, useCollections } from "@/hooks/useDatabase";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const conditions = [
   { value: "mint", label: "Mint (M)" },
@@ -28,19 +30,33 @@ const conditions = [
 ];
 
 export default function AddItemPage() {
-  const [itemType, setItemType] = useState("card");
-  const [name, setName] = useState("");
-  const [setName_, setSetName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [eraName, setEraName] = useState("");
-  const [condition, setCondition] = useState("");
+  const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+  const [itemType, setItemType] = useState(searchParams.get("type") || "card");
+  const [name, setName] = useState(searchParams.get("name") || "");
+  const [setName_, setSetName] = useState(searchParams.get("set_name") || "");
+  const [cardNumber, setCardNumber] = useState(searchParams.get("card_number") || "");
+  const [eraName, setEraName] = useState(searchParams.get("era_name") || "");
+  const [condition, setCondition] = useState(searchParams.get("condition") || "");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [notes, setNotes] = useState("");
   const [collectionId, setCollectionId] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const navigate = useNavigate();
   const createItem = useCreateItem();
   const { data: collections } = useCollections();
+
+  // Load scanned image from sessionStorage
+  useEffect(() => {
+    if (searchParams.get("has_image") === "1") {
+      const scanImage = sessionStorage.getItem("scan_image");
+      if (scanImage) {
+        setImagePreview(scanImage);
+        sessionStorage.removeItem("scan_image");
+      }
+    }
+  }, [searchParams]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,13 +67,41 @@ export default function AddItemPage() {
     }
   };
 
+  const uploadImage = async (): Promise<string | undefined> => {
+    if (!imagePreview || !user) return undefined;
+
+    // Convert base64 to blob
+    const response = await fetch(imagePreview);
+    const blob = await response.blob();
+    const ext = blob.type.split("/")[1] || "jpg";
+    const fileName = `${user.id}/${crypto.randomUUID()}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from("item-images")
+      .upload(fileName, blob, { contentType: blob.type });
+
+    if (error) throw error;
+
+    const { data: urlData } = supabase.storage
+      .from("item-images")
+      .getPublicUrl(fileName);
+
+    return urlData.publicUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       toast.error("Please enter an item name.");
       return;
     }
+    setUploading(true);
     try {
+      let imageUrl: string | undefined;
+      if (imagePreview) {
+        imageUrl = await uploadImage();
+      }
+
       await createItem.mutateAsync({
         name,
         type: itemType,
@@ -68,11 +112,14 @@ export default function AddItemPage() {
         condition: condition || undefined,
         purchase_price: purchasePrice ? parseFloat(purchasePrice) : undefined,
         notes: notes || undefined,
+        image_url: imageUrl,
       });
       toast.success("Item added to your collection!");
       navigate("/dashboard");
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -94,7 +141,6 @@ export default function AddItemPage() {
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            {/* Item Type */}
             <Card className="glass-elevated">
               <CardHeader><CardTitle className="text-base">Item Type</CardTitle></CardHeader>
               <CardContent>
@@ -111,7 +157,6 @@ export default function AddItemPage() {
               </CardContent>
             </Card>
 
-            {/* Photo */}
             <Card className="glass-elevated">
               <CardHeader><CardTitle className="text-base">Photo</CardTitle></CardHeader>
               <CardContent>
@@ -130,7 +175,6 @@ export default function AddItemPage() {
               </CardContent>
             </Card>
 
-            {/* Details */}
             <Card className="glass-elevated">
               <CardHeader><CardTitle className="text-base">Details</CardTitle></CardHeader>
               <CardContent className="space-y-4">
@@ -138,13 +182,10 @@ export default function AddItemPage() {
                   <Label htmlFor="name">Name *</Label>
                   <Input id="name" placeholder="e.g. Charizard" value={name} onChange={(e) => setName(e.target.value)} required />
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="collection">Collection</Label>
                   <Select value={collectionId} onValueChange={setCollectionId}>
-                    <SelectTrigger id="collection">
-                      <SelectValue placeholder="Select collection (optional)" />
-                    </SelectTrigger>
+                    <SelectTrigger id="collection"><SelectValue placeholder="Select collection (optional)" /></SelectTrigger>
                     <SelectContent>
                       {(collections || []).map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
@@ -152,10 +193,9 @@ export default function AddItemPage() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="set">Set / Collection Name</Label>
+                    <Label htmlFor="set">Set Name</Label>
                     <Input id="set" placeholder="e.g. Base Set" value={setName_} onChange={(e) => setSetName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
@@ -163,7 +203,6 @@ export default function AddItemPage() {
                     <Input id="number" placeholder="e.g. 4/102" value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="era">Era</Label>
@@ -174,19 +213,15 @@ export default function AddItemPage() {
                     <Select value={condition} onValueChange={setCondition}>
                       <SelectTrigger id="condition"><SelectValue placeholder="Select condition" /></SelectTrigger>
                       <SelectContent>
-                        {conditions.map((c) => (
-                          <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                        ))}
+                        {conditions.map((c) => (<SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>))}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="price">Purchase Price (USD)</Label>
                   <Input id="price" type="number" step="0.01" min="0" placeholder="0.00" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} />
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Textarea id="notes" placeholder="Any additional notes..." value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -196,9 +231,9 @@ export default function AddItemPage() {
 
             <div className="flex justify-end gap-3">
               <Link to="/dashboard"><Button variant="outline">Cancel</Button></Link>
-              <Button type="submit" variant="hero" className="gap-2" disabled={createItem.isPending}>
+              <Button type="submit" variant="hero" className="gap-2" disabled={createItem.isPending || uploading}>
                 <Save className="w-4 h-4" />
-                {createItem.isPending ? "Saving..." : "Save Item"}
+                {uploading ? "Uploading..." : createItem.isPending ? "Saving..." : "Save Item"}
               </Button>
             </div>
           </div>
