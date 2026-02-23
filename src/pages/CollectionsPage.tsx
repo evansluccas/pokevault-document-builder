@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -124,22 +125,24 @@ export default function CollectionsPage() {
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((col) => (
-              <Card key={col.id} className="glass-elevated hover:shadow-lg transition-shadow group">
-                <CardContent className="p-5">
-                  <div className="w-full h-32 rounded-lg bg-muted mb-4 flex items-center justify-center">
-                    <FolderOpen className="w-10 h-10 text-muted-foreground group-hover:text-accent transition-colors" />
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground mb-1">{col.name}</h3>
-                      {col.description && <p className="text-sm text-muted-foreground line-clamp-2">{col.description}</p>}
+              <Link key={col.id} to={`/collections/${col.id}`}>
+                <Card className="glass-elevated hover:shadow-lg transition-shadow group cursor-pointer h-full">
+                  <CardContent className="p-5">
+                    <div className="w-full h-32 rounded-lg bg-muted mb-4 flex items-center justify-center">
+                      <FolderOpen className="w-10 h-10 text-muted-foreground group-hover:text-accent transition-colors" />
                     </div>
-                    <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(col.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-foreground mb-1">{col.name}</h3>
+                        {col.description && <p className="text-sm text-muted-foreground line-clamp-2">{col.description}</p>}
+                      </div>
+                      <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-destructive" onClick={(e) => { e.preventDefault(); handleDelete(col.id); }}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         )}
