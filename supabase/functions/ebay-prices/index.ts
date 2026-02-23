@@ -10,7 +10,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { item_id, name, set_name, card_number } = await req.json();
+    const { item_id, name, set_name, card_number, type } = await req.json();
     if (!item_id || !name) {
       return new Response(JSON.stringify({ error: "item_id and name are required" }), {
         status: 400,
@@ -18,15 +18,20 @@ serve(async (req) => {
       });
     }
 
-    // Build search query
+    // Build search query based on item type
+    const isProduct = type === "product";
     const searchTerms = [name, set_name, card_number].filter(Boolean).join(" ");
-    const query = `Pokemon ${searchTerms}`;
+    const query = isProduct
+      ? `Pokemon ${searchTerms}`
+      : `Pokemon ${searchTerms} card`;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    // Use AI to simulate eBay price lookup since we don't have an eBay API key
-    // In production, this would call the eBay Finding API
+    const itemTypeDesc = isProduct
+      ? "sealed Pokémon product (e.g. booster box, ETB, collection box, blister pack)"
+      : "Pokémon trading card (single card)";
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -38,22 +43,26 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are a Pokémon card market pricing expert. Given a card name and details, estimate realistic recent eBay sold prices based on your knowledge. Return ONLY a valid JSON object with this structure:
+            content: `You are a Pokémon TCG market pricing expert specializing in eBay sold listings. You accurately estimate prices for BOTH single cards AND sealed products (booster boxes, ETBs, etc.).
+
+The user is asking about a ${itemTypeDesc}. Pay close attention to the item type — a sealed booster box is worth significantly more than a single card from the same set.
+
+Return ONLY a valid JSON object with this structure:
 {
   "sold_prices": [
-    { "price": 12.50, "date": "2026-02-15", "title": "Pokemon Charizard Base Set 4/102 Holo" },
-    { "price": 15.00, "date": "2026-02-10", "title": "Charizard 4/102 Base Set Holo Rare" }
+    { "price": 250.00, "date": "2026-02-15", "title": "Exact eBay listing title example" },
+    { "price": 260.00, "date": "2026-02-10", "title": "Another listing title" }
   ],
-  "average_price": 13.75,
-  "lowest_price": 12.50,
-  "highest_price": 15.00,
-  "notes": "Prices vary significantly based on condition and grading"
+  "average_price": 255.00,
+  "lowest_price": 250.00,
+  "highest_price": 260.00,
+  "notes": "Brief note about pricing factors"
 }
-Provide 3-5 realistic sold prices. If the card is extremely rare or unknown, estimate based on similar cards. Use realistic 2026 dates. Do not include any text outside the JSON.`,
+Provide 3-5 realistic sold prices reflecting actual 2026 market values. Be accurate — sealed products like booster boxes can be worth hundreds or thousands of dollars. Do not confuse single card prices with sealed product prices. Do not include any text outside the JSON.`,
           },
           {
             role: "user",
-            content: `Estimate recent eBay sold prices for: ${query}`,
+            content: `Estimate recent eBay sold prices for this ${isProduct ? "sealed product" : "single card"}: ${query}`,
           },
         ],
       }),

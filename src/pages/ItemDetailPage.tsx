@@ -76,7 +76,7 @@ export default function ItemDetailPage() {
     setFetchingPrices(true);
     try {
       const { data, error } = await supabase.functions.invoke("ebay-prices", {
-        body: { item_id: item.id, name: item.name, set_name: item.set_name, card_number: item.card_number },
+        body: { item_id: item.id, name: item.name, set_name: item.set_name, card_number: item.card_number, type: item.type },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
