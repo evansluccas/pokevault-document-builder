@@ -40,7 +40,7 @@ export default function AddItemPage() {
   const [condition, setCondition] = useState(searchParams.get("condition") || "");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [notes, setNotes] = useState("");
-  const [collectionId, setCollectionId] = useState("");
+  const [collectionId, setCollectionId] = useState(searchParams.get("collection") || "");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const navigate = useNavigate();

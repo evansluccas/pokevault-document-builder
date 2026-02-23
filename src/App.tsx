@@ -10,6 +10,7 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import DashboardPage from "./pages/DashboardPage";
 import CollectionsPage from "./pages/CollectionsPage";
+import CollectionDetailPage from "./pages/CollectionDetailPage";
 import AddItemPage from "./pages/AddItemPage";
 import ItemDetailPage from "./pages/ItemDetailPage";
 import ScanPage from "./pages/ScanPage";
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
             <Route path="/collections" element={<ProtectedRoute><CollectionsPage /></ProtectedRoute>} />
+            <Route path="/collections/:id" element={<ProtectedRoute><CollectionDetailPage /></ProtectedRoute>} />
             <Route path="/items/new" element={<ProtectedRoute><AddItemPage /></ProtectedRoute>} />
             <Route path="/items/:id" element={<ProtectedRoute><ItemDetailPage /></ProtectedRoute>} />
             <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
