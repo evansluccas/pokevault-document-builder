@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   ArrowLeft,
   PlusCircle,
@@ -14,14 +23,56 @@ import {
   TrendingUp,
   Package,
   ImageIcon,
+  LinkIcon,
 } from "lucide-react";
 import { useItems, useCollections } from "@/hooks/useDatabase";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export default function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const { data: collections, isLoading: loadingCol } = useCollections();
   const { data: items, isLoading: loadingItems } = useItems(id);
+  const { data: allItems } = useItems(); // all user items
   const [searchQuery, setSearchQuery] = useState("");
+  const [showAddExisting, setShowAddExisting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [existingSearch, setExistingSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Items not already in this collection
+  const availableItems = (allItems || []).filter(
+    (i) => i.collection_id !== id
+  );
+  const filteredAvailable = availableItems.filter((i) =>
+    i.name.toLowerCase().includes(existingSearch.toLowerCase())
+  );
+
+  const toggleItem = (itemId: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(itemId) ? prev.filter((x) => x !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const handleAddExisting = async () => {
+    if (selectedIds.length === 0) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from("items")
+      .update({ collection_id: id })
+      .in("id", selectedIds);
+    setSaving(false);
+    if (error) {
+      toast.error("Failed to add items");
+    } else {
+      toast.success(`${selectedIds.length} item(s) added to collection`);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      setSelectedIds([]);
+      setShowAddExisting(false);
+    }
+  };
 
   const collection = collections?.find((c) => c.id === id);
 
@@ -94,12 +145,18 @@ export default function CollectionDetailPage() {
               )}
             </div>
           </div>
-          <Link to={`/items/new?collection=${id}`}>
-            <Button variant="hero" className="gap-2">
-              <PlusCircle className="w-4 h-4" />
-              Add Item
+          <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setShowAddExisting(true)}>
+              <LinkIcon className="w-4 h-4" />
+              Add Existing
             </Button>
-          </Link>
+            <Link to={`/items/new?collection=${id}`}>
+              <Button variant="hero" className="gap-2">
+                <PlusCircle className="w-4 h-4" />
+                Add New
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Stats */}
@@ -224,6 +281,59 @@ export default function CollectionDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Add Existing Items Dialog */}
+      <Dialog open={showAddExisting} onOpenChange={(open) => { setShowAddExisting(open); if (!open) { setSelectedIds([]); setExistingSearch(""); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Add Existing Items</DialogTitle>
+          </DialogHeader>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search your items..."
+              className="pl-9"
+              value={existingSearch}
+              onChange={(e) => setExistingSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1 min-h-0 max-h-[50vh]">
+            {filteredAvailable.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No available items found.
+              </p>
+            ) : (
+              filteredAvailable.map((item) => (
+                <label
+                  key={item.id}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                >
+                  <Checkbox
+                    checked={selectedIds.includes(item.id)}
+                    onCheckedChange={() => toggleItem(item.id)}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-foreground truncate">{item.name}</p>
+                    <div className="flex gap-2 text-xs text-muted-foreground">
+                      {item.set_name && <span>{item.set_name}</span>}
+                      {item.condition && <span>• {item.condition}</span>}
+                    </div>
+                  </div>
+                  {item.purchase_price != null && (
+                    <span className="text-xs text-muted-foreground">${Number(item.purchase_price).toFixed(2)}</span>
+                  )}
+                </label>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddExisting(false)}>Cancel</Button>
+            <Button onClick={handleAddExisting} disabled={selectedIds.length === 0 || saving}>
+              {saving ? "Adding..." : `Add ${selectedIds.length} Item${selectedIds.length !== 1 ? "s" : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }
