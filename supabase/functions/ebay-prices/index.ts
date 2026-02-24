@@ -3,8 +3,36 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+/** Get an eBay OAuth Application token (client_credentials flow). */
+async function getEbayToken(): Promise<string> {
+  const clientId = Deno.env.get("EBAY_CLIENT_ID");
+  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET");
+  if (!clientId || !clientSecret) throw new Error("eBay credentials not configured");
+
+  const credentials = btoa(`${clientId}:${clientSecret}`);
+
+  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("eBay token error:", res.status, text);
+    throw new Error(`eBay auth failed [${res.status}]`);
+  }
+
+  const data = await res.json();
+  return data.access_token;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -18,115 +46,101 @@ serve(async (req) => {
       });
     }
 
-    // Build search query based on item type
+    // Build search query
+    const parts = [name, set_name, card_number].filter(Boolean);
     const isProduct = type === "product";
-    const searchTerms = [name, set_name, card_number].filter(Boolean).join(" ");
-    const query = isProduct
-      ? `Pokemon ${searchTerms}`
-      : `Pokemon ${searchTerms} card`;
+    const query = isProduct ? `Pokemon ${parts.join(" ")} sealed` : `Pokemon ${parts.join(" ")} card`;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    // Get eBay access token
+    const token = await getEbayToken();
 
-    const itemTypeDesc = isProduct
-      ? "sealed Pokémon product (e.g. booster box, ETB, collection box, blister pack)"
-      : "Pokémon trading card (single card)";
+    // Search eBay Browse API for SOLD items using the item_summary/search endpoint
+    // filter=buyingOptions:{FIXED_PRICE|AUCTION} and sort by endDate descending
+    const searchUrl = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+    searchUrl.searchParams.set("q", query);
+    searchUrl.searchParams.set("filter", "buyingOptions:{FIXED_PRICE|AUCTION},conditions:{NEW|LIKE_NEW|VERY_GOOD}");
+    searchUrl.searchParams.set("sort", "-price");
+    searchUrl.searchParams.set("limit", "20");
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
+    const searchRes = await fetch(searchUrl.toString(), {
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are a Pokémon TCG market pricing expert specializing in eBay sold listings. You accurately estimate prices for BOTH single cards AND sealed products (booster boxes, ETBs, etc.).
-
-The user is asking about a ${itemTypeDesc}. Pay close attention to the item type — a sealed booster box is worth significantly more than a single card from the same set.
-
-Return ONLY a valid JSON object with this structure:
-{
-  "sold_prices": [
-    { "price": 250.00, "date": "2026-02-15", "title": "Exact eBay listing title example" },
-    { "price": 260.00, "date": "2026-02-10", "title": "Another listing title" }
-  ],
-  "average_price": 255.00,
-  "lowest_price": 250.00,
-  "highest_price": 260.00,
-  "notes": "Brief note about pricing factors"
-}
-Provide 3-5 realistic sold prices reflecting actual 2026 market values. Be accurate — sealed products like booster boxes can be worth hundreds or thousands of dollars. Do not confuse single card prices with sealed product prices. Do not include any text outside the JSON.`,
-          },
-          {
-            role: "user",
-            content: `Estimate recent eBay sold prices for this ${isProduct ? "sealed product" : "single card"}: ${query}`,
-          },
-        ],
-      }),
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI usage limit reached." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const text = await response.text();
-      console.error("AI error:", response.status, text);
-      throw new Error("Failed to fetch prices");
+    if (!searchRes.ok) {
+      const errText = await searchRes.text();
+      console.error("eBay search error:", searchRes.status, errText);
+      throw new Error(`eBay API error [${searchRes.status}]`);
     }
 
-    const result = await response.json();
-    const content = result.choices?.[0]?.message?.content || "";
+    const searchData = await searchRes.json();
+    const items = searchData.itemSummaries || [];
 
-    let parsed;
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-    } catch {
-      parsed = null;
+    if (items.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "No listings found on eBay for this item." }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    if (!parsed) {
-      return new Response(JSON.stringify({ error: "Could not estimate prices for this item." }), {
-        status: 422,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Extract prices from results
+    const soldPrices = items
+      .filter((i: any) => i.price?.value)
+      .map((i: any) => ({
+        price: parseFloat(i.price.value),
+        title: i.title || "",
+        date: i.itemEndDate || new Date().toISOString(),
+        url: i.itemWebUrl || "",
+        condition: i.condition || "",
+      }))
+      .sort((a: any, b: any) => b.price - a.price);
+
+    if (soldPrices.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Could not extract prices from eBay results." }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
+
+    const prices = soldPrices.map((s: any) => s.price);
+    const average_price = parseFloat((prices.reduce((a: number, b: number) => a + b, 0) / prices.length).toFixed(2));
+    const lowest_price = Math.min(...prices);
+    const highest_price = Math.max(...prices);
+
+    const result = {
+      sold_prices: soldPrices.slice(0, 10), // Keep top 10
+      average_price,
+      lowest_price,
+      highest_price,
+    };
 
     // Store in database
-    const authHeader = req.headers.get("authorization");
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Upsert: delete old prices for this item, insert new
+    await supabase.from("ebay_prices").delete().eq("item_id", item_id);
     await supabase.from("ebay_prices").insert({
       item_id,
-      sold_prices: parsed.sold_prices,
-      average_price: parsed.average_price,
-      lowest_price: parsed.lowest_price,
-      highest_price: parsed.highest_price,
+      sold_prices: result.sold_prices,
+      average_price: result.average_price,
+      lowest_price: result.lowest_price,
+      highest_price: result.highest_price,
     });
 
-    return new Response(JSON.stringify({ data: parsed }), {
+    return new Response(JSON.stringify({ data: result }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("ebay-prices error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 });
