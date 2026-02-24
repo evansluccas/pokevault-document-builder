@@ -26,8 +26,8 @@ serve(async (req) => {
     const parts = [name, set_name, card_number].filter(Boolean);
     const isProduct = type === "product";
     const keywords = isProduct
-      ? `Pokemon ${parts.join(" ")} sealed -lot -bundle -bulk -wholesale -playset`
-      : `Pokemon ${parts.join(" ")} card -lot -bundle -bulk -wholesale -playset`;
+      ? `Pokemon ${parts.join(" ")} sealed -lot -bundle -bulk -wholesale -playset -case`
+      : `Pokemon ${parts.join(" ")} card -lot -bundle -bulk -wholesale -playset -case`;
 
     // Use Finding API — findCompletedItems (sold listings only)
     const url = new URL("https://svcs.ebay.com/services/search/FindingService/v1");
@@ -60,11 +60,15 @@ serve(async (req) => {
     const searchResult = data?.findCompletedItemsResponse?.[0]?.searchResult?.[0];
     const rawItems = searchResult?.item || [];
 
-    // Filter out bulk/lot titles
-    const bulkPattern = /\b(\d+x\b|\d+\s*x\s|\blot\b|\bbundle\b|\bwholesale\b|\bbulk\b|\bplayset\b|\bcollection\b|\bfactory sealed case\b)/i;
+    // Filter out bulk/lot/case titles
+    const bulkPattern = /\b(\d+x\b|\d+\s*x\s|\blot\b|\bbundle\b|\bwholesale\b|\bbulk\b|\bplayset\b|\bcollection\b|\bcase\b|\bfactory sealed case\b)/i;
     const items = rawItems.filter((i: any) => {
       const title = (i.title?.[0] || "").toLowerCase();
-      return !bulkPattern.test(title) && !/^\d+\s*x\s/i.test(title);
+      if (bulkPattern.test(title)) return false;
+      if (/^\d+\s*x\s/i.test(title)) return false;
+      // Filter titles with quantity indicators like "6 box"
+      if (/\b\d+\s*(x\s*)?box/i.test(title) && !/\b(36|1)\s/i.test(title)) return false;
+      return true;
     });
 
     if (items.length === 0) {
