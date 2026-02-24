@@ -7,33 +7,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-/** Get an eBay OAuth Application token (client_credentials flow). */
-async function getEbayToken(): Promise<string> {
-  const clientId = Deno.env.get("EBAY_CLIENT_ID");
-  const clientSecret = Deno.env.get("EBAY_CLIENT_SECRET");
-  if (!clientId || !clientSecret) throw new Error("eBay credentials not configured");
-
-  const credentials = btoa(`${clientId}:${clientSecret}`);
-
-  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("eBay token error:", res.status, text);
-    throw new Error(`eBay auth failed [${res.status}]`);
-  }
-
-  const data = await res.json();
-  return data.access_token;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -46,66 +19,70 @@ serve(async (req) => {
       });
     }
 
-    // Build search query — append negative keywords to exclude lots/bundles
+    const appId = Deno.env.get("EBAY_CLIENT_ID");
+    if (!appId) throw new Error("EBAY_CLIENT_ID not configured");
+
+    // Build search keywords — exclude bulk/lot listings
     const parts = [name, set_name, card_number].filter(Boolean);
     const isProduct = type === "product";
-    const baseQuery = isProduct ? `Pokemon ${parts.join(" ")} sealed` : `Pokemon ${parts.join(" ")} card`;
-    // Exclude bulk/lot listings from the search
-    const query = `${baseQuery} -lot -bundle -wholesale -bulk -collection -set -playset`;
+    const keywords = isProduct
+      ? `Pokemon ${parts.join(" ")} sealed -lot -bundle -bulk -wholesale -playset`
+      : `Pokemon ${parts.join(" ")} card -lot -bundle -bulk -wholesale -playset`;
 
-    // Get eBay access token
-    const token = await getEbayToken();
+    // Use Finding API — findCompletedItems (sold listings only)
+    const url = new URL("https://svcs.ebay.com/services/search/FindingService/v1");
+    url.searchParams.set("OPERATION-NAME", "findCompletedItems");
+    url.searchParams.set("SERVICE-VERSION", "1.13.0");
+    url.searchParams.set("SECURITY-APPNAME", appId);
+    url.searchParams.set("RESPONSE-DATA-FORMAT", "JSON");
+    url.searchParams.set("REST-PAYLOAD", "");
+    url.searchParams.set("keywords", keywords);
+    url.searchParams.set("categoryId", "183454"); // Trading Cards category
+    url.searchParams.set("paginationInput.entriesPerPage", "40");
+    url.searchParams.set("sortOrder", "EndTimeSoonest");
+    // Only sold items (not unsold completed)
+    url.searchParams.set("itemFilter(0).name", "SoldItemsOnly");
+    url.searchParams.set("itemFilter(0).value", "true");
+    // Condition: new / like new
+    url.searchParams.set("itemFilter(1).name", "Condition");
+    url.searchParams.set("itemFilter(1).value(0)", "1000"); // New
+    url.searchParams.set("itemFilter(1).value(1)", "1500"); // New other
+    url.searchParams.set("itemFilter(1).value(2)", "2500"); // Seller refurbished / Like New
 
-    // Search eBay Browse API
-    const searchUrl = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
-    searchUrl.searchParams.set("q", query);
-    searchUrl.searchParams.set("filter", "buyingOptions:{FIXED_PRICE|AUCTION},conditions:{NEW|LIKE_NEW|VERY_GOOD}");
-    searchUrl.searchParams.set("sort", "-price");
-    searchUrl.searchParams.set("limit", "40"); // fetch more so we can filter
-
-    const searchRes = await fetch(searchUrl.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!searchRes.ok) {
-      const errText = await searchRes.text();
-      console.error("eBay search error:", searchRes.status, errText);
-      throw new Error(`eBay API error [${searchRes.status}]`);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("eBay Finding API error:", res.status, errText);
+      throw new Error(`eBay Finding API error [${res.status}]`);
     }
 
-    const searchData = await searchRes.json();
-    const rawItems = searchData.itemSummaries || [];
+    const data = await res.json();
+    const searchResult = data?.findCompletedItemsResponse?.[0]?.searchResult?.[0];
+    const rawItems = searchResult?.item || [];
 
-    // Filter out bulk / lot / multi-quantity listings by title
+    // Filter out bulk/lot titles
     const bulkPattern = /\b(\d+x\b|\d+\s*x\s|\blot\b|\bbundle\b|\bwholesale\b|\bbulk\b|\bplayset\b|\bcollection\b|\bfactory sealed case\b)/i;
     const items = rawItems.filter((i: any) => {
-      const title = (i.title || "").toLowerCase();
-      if (bulkPattern.test(title)) return false;
-      // Also skip if the title starts with a number followed by "x" (e.g. "24x", "10 x")
-      if (/^\d+\s*x\s/i.test(title)) return false;
-      return true;
+      const title = (i.title?.[0] || "").toLowerCase();
+      return !bulkPattern.test(title) && !/^\d+\s*x\s/i.test(title);
     });
 
     if (items.length === 0) {
       return new Response(
-        JSON.stringify({ error: "No single-item listings found on eBay for this item." }),
+        JSON.stringify({ error: "No sold listings found on eBay for this item." }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Extract prices from filtered results
+    // Extract sold prices
     const soldPrices = items
-      .filter((i: any) => i.price?.value)
+      .filter((i: any) => i.sellingStatus?.[0]?.currentPrice?.[0]?.__value__)
       .map((i: any) => ({
-        price: parseFloat(i.price.value),
-        title: i.title || "",
-        date: i.itemEndDate || new Date().toISOString(),
-        url: i.itemWebUrl || "",
-        condition: i.condition || "",
+        price: parseFloat(i.sellingStatus[0].currentPrice[0].__value__),
+        title: i.title?.[0] || "",
+        date: i.listingInfo?.[0]?.endTime?.[0] || new Date().toISOString(),
+        url: i.viewItemURL?.[0] || "",
+        condition: i.condition?.[0]?.conditionDisplayName?.[0] || "",
       }))
       .sort((a: any, b: any) => b.price - a.price);
 
@@ -122,7 +99,7 @@ serve(async (req) => {
     const highest_price = Math.max(...prices);
 
     const result = {
-      sold_prices: soldPrices.slice(0, 10), // Keep top 10
+      sold_prices: soldPrices.slice(0, 10),
       average_price,
       lowest_price,
       highest_price,
@@ -134,7 +111,6 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Upsert: delete old prices for this item, insert new
     await supabase.from("ebay_prices").delete().eq("item_id", item_id);
     await supabase.from("ebay_prices").insert({
       item_id,
