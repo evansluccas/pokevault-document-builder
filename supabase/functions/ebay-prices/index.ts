@@ -46,21 +46,22 @@ serve(async (req) => {
       });
     }
 
-    // Build search query
+    // Build search query — append negative keywords to exclude lots/bundles
     const parts = [name, set_name, card_number].filter(Boolean);
     const isProduct = type === "product";
-    const query = isProduct ? `Pokemon ${parts.join(" ")} sealed` : `Pokemon ${parts.join(" ")} card`;
+    const baseQuery = isProduct ? `Pokemon ${parts.join(" ")} sealed` : `Pokemon ${parts.join(" ")} card`;
+    // Exclude bulk/lot listings from the search
+    const query = `${baseQuery} -lot -bundle -wholesale -bulk -collection -set -playset`;
 
     // Get eBay access token
     const token = await getEbayToken();
 
-    // Search eBay Browse API for SOLD items using the item_summary/search endpoint
-    // filter=buyingOptions:{FIXED_PRICE|AUCTION} and sort by endDate descending
+    // Search eBay Browse API
     const searchUrl = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
     searchUrl.searchParams.set("q", query);
     searchUrl.searchParams.set("filter", "buyingOptions:{FIXED_PRICE|AUCTION},conditions:{NEW|LIKE_NEW|VERY_GOOD}");
     searchUrl.searchParams.set("sort", "-price");
-    searchUrl.searchParams.set("limit", "20");
+    searchUrl.searchParams.set("limit", "40"); // fetch more so we can filter
 
     const searchRes = await fetch(searchUrl.toString(), {
       headers: {
@@ -77,16 +78,26 @@ serve(async (req) => {
     }
 
     const searchData = await searchRes.json();
-    const items = searchData.itemSummaries || [];
+    const rawItems = searchData.itemSummaries || [];
+
+    // Filter out bulk / lot / multi-quantity listings by title
+    const bulkPattern = /\b(\d+x\b|\d+\s*x\s|\blot\b|\bbundle\b|\bwholesale\b|\bbulk\b|\bplayset\b|\bcollection\b|\bfactory sealed case\b)/i;
+    const items = rawItems.filter((i: any) => {
+      const title = (i.title || "").toLowerCase();
+      if (bulkPattern.test(title)) return false;
+      // Also skip if the title starts with a number followed by "x" (e.g. "24x", "10 x")
+      if (/^\d+\s*x\s/i.test(title)) return false;
+      return true;
+    });
 
     if (items.length === 0) {
       return new Response(
-        JSON.stringify({ error: "No listings found on eBay for this item." }),
+        JSON.stringify({ error: "No single-item listings found on eBay for this item." }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Extract prices from results
+    // Extract prices from filtered results
     const soldPrices = items
       .filter((i: any) => i.price?.value)
       .map((i: any) => ({
